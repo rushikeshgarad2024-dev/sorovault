@@ -221,7 +221,23 @@ func (g *tsGen) writeClient(fns []model.Function) {
 	g.b.WriteString("\n/** Typed methods of the contract. Each one simulates on call; sign and send the result to submit. */\n")
 	g.b.WriteString("export interface Client {\n")
 	for _, fn := range fns {
-		g.writeDoc("  ", fn.Doc)
+		// Arguments are properties of the single args object, so JSDoc
+		// must use args.<name> to attach hover documentation correctly.
+		// Reuse writeDoc for escaping */ and formatting multiline docs.
+		var docs []string
+		if strings.TrimSpace(fn.Doc) != "" {
+			docs = append(docs, strings.TrimSpace(fn.Doc))
+		}
+		for _, in := range fn.Inputs {
+			if doc := strings.TrimSpace(in.Doc); doc != "" {
+				lines := strings.Split(doc, "\n")
+				for i := 1; i < len(lines); i++ {
+					lines[i] = strings.TrimSpace(lines[i])
+				}
+				docs = append(docs, "@param args."+in.Name+" "+strings.Join(lines, "\n"))
+			}
+		}
+		g.writeDoc("  ", strings.Join(docs, "\n\n"))
 
 		ret := "null"
 		if len(fn.Outputs) > 0 {
