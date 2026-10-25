@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/soroworks/sorovault/internal/model"
+	"github.com/soroworks/sorovault/internal/spec"
 )
 
 // Memory is an in-process Store.
@@ -49,6 +50,9 @@ func (m *Memory) SetClock(now func() time.Time) {
 	defer m.mu.Unlock()
 	m.now = now
 }
+
+// Ping satisfies Store. The memory store has no external service to ask.
+func (m *Memory) Ping(ctx context.Context) error { return ctx.Err() }
 
 // Close satisfies Store. There is nothing to release.
 func (m *Memory) Close() error { return nil }
@@ -138,6 +142,7 @@ func (m *Memory) Save(ctx context.Context, c Contract, iface *model.Interface) e
 	c.LastRefreshed = now
 	// A saved interface means the contract was live, so it is not missing
 	// any more.
+	c.Implements = spec.ImplementedStandards(iface)
 	c.MissingSince = nil
 	m.contracts[k] = c
 
@@ -150,12 +155,13 @@ func (m *Memory) Save(ctx context.Context, c Contract, iface *model.Interface) e
 
 	m.nextID++
 	m.specs[k] = append(m.specs[k], Spec{
-		ID:         m.nextID,
-		Network:    c.Network,
-		ContractID: c.ContractID,
-		WasmHash:   c.CurrentWasmHash,
-		Interface:  cloned,
-		DecodedAt:  now,
+		ID:             m.nextID,
+		Network:        c.Network,
+		ContractID:     c.ContractID,
+		WasmHash:       c.CurrentWasmHash,
+		Interface:      cloned,
+		DecodedAt:      now,
+		ObservedLedger: c.ObservedLedger,
 	})
 	return nil
 }
@@ -514,6 +520,9 @@ func (m *Memory) ListContracts(ctx context.Context, f ListFilter) (*ContractPage
 		if f.Network != "" && c.Network != f.Network {
 			continue
 		}
+		if len(f.Implements) > 0 && !hasAllStandards(c.Implements, f.Implements) {
+			continue
+		}
 		if needle != "" {
 			c.Matches = matchSymbols(m.currentSymbols(k, c.CurrentWasmHash), f.Query)
 			if len(c.Matches) == 0 &&
@@ -676,9 +685,10 @@ func (m *Memory) ListVersions(ctx context.Context, network, contractID string) (
 	versions := make([]SpecVersion, 0, len(m.specs[k]))
 	for _, s := range m.specs[k] {
 		versions = append(versions, SpecVersion{
-			WasmHash:  s.WasmHash,
-			DecodedAt: s.DecodedAt,
-			Current:   s.WasmHash == c.CurrentWasmHash,
+			WasmHash:       s.WasmHash,
+			DecodedAt:      s.DecodedAt,
+			Current:        s.WasmHash == c.CurrentWasmHash,
+			ObservedLedger: s.ObservedLedger,
 		})
 	}
 
