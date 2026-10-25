@@ -179,6 +179,20 @@ func (r *Registry) Network(ctx context.Context) (string, error) {
 	return r.network, nil
 }
 
+// CheckNetwork asks the endpoint for its passphrase and verifies it against
+// the configured one, without using the cached network label.
+//
+// Readiness uses it so an endpoint that becomes unreachable after startup is
+// noticed; Network deliberately caches a successful answer forever, since a
+// resolved network does not change.
+func (r *Registry) CheckNetwork(ctx context.Context) error {
+	passphrase, err := r.fetcher.Network(ctx)
+	if err != nil {
+		return err
+	}
+	return CheckPassphrase(passphrase, r.expectPassphrase)
+}
+
 // CheckPassphrase reports whether the passphrase an endpoint reports is the
 // one the operator expects.
 //
@@ -258,10 +272,15 @@ func (r *Registry) Register(ctx context.Context, contractID string) (*Result, er
 		return nil, fmt.Errorf("registry: decoding %s: %w", contractID, err)
 	}
 
+	ledger, err := r.observedLedger(ctx)
+	if err != nil {
+		return nil, err
+	}
 	record := store.Contract{
 		ContractID:      contractID,
 		Network:         network,
 		CurrentWasmHash: contract.WasmHash,
+		ObservedLedger:  ledger,
 	}
 	if err := r.store.Save(ctx, record, iface); err != nil {
 		return nil, err
@@ -417,7 +436,12 @@ func (r *Registry) Refresh(ctx context.Context, contractID string) (*Result, err
 		return nil, fmt.Errorf("registry: decoding %s: %w", contractID, err)
 	}
 
+	ledger, err := r.observedLedger(ctx)
+	if err != nil {
+		return nil, err
+	}
 	record := *existing
+	record.ObservedLedger = ledger
 	record.CurrentWasmHash = contract.WasmHash
 	if err := r.store.Save(ctx, record, iface); err != nil {
 		return nil, err
@@ -465,6 +489,22 @@ func (r *Registry) markMissing(ctx context.Context, network string, existing *st
 		"missing_since", updated.MissingSince)
 
 	return &Result{Contract: *updated, Missing: true}, nil
+}
+
+// observedLedger uses the RPC ledger clock when available. Test fetchers
+// without a ledger source retain null for compatibility.
+func (r *Registry) observedLedger(ctx context.Context) (*uint32, error) {
+	f, ok := r.fetcher.(interface {
+		LatestLedger(context.Context) (uint32, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	ledger, err := f.LatestLedger(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ledger, nil
 }
 
 // Store exposes the underlying store for read-only queries the API and UI
