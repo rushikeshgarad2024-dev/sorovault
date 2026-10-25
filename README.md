@@ -180,6 +180,9 @@ be overridden in a values file. `RPC_URL`, `NETWORK_PASSPHRASE`, `HTTP_ADDR`,
 use `extraEnv` for other environment variables. The server and migration Job
 run non-root with read-only root filesystems.
 
+For production deployment — sizing, backups, upgrades and monitoring — see
+[docs/operations.md](docs/operations.md).
+
 ### Running locally
 
 ```console
