@@ -74,7 +74,7 @@ func TestGetWasmSpecUnknownHash(t *testing.T) {
 func TestGetWasmSpecStoreFailure(t *testing.T) {
 	t.Parallel()
 
-	const secret = "dial tcp 10.0.0.5:5432: password authentication failed for user postgres"
+	const secret = "dial tcp 10.0.0.5:5432: password authentication failed for user postgres" //nolint:gosec // a fake database error the test asserts is not leaked
 	h := newHarnessWithStore(t, stellartest.New(), wasmSpecStore{
 		Store: store.NewMemory(),
 		err:   errors.New(secret),
