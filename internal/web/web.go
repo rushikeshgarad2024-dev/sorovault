@@ -93,6 +93,7 @@ func (s *Server) Routes() chi.Router {
 	r.Use(securityHeaders)
 
 	r.Get("/", s.index)
+	r.Get("/stats", s.stats)
 	r.Get("/sitemap.xml", s.sitemap)
 	r.Get("/sitemap-{page}.xml", s.sitemapPage)
 	r.Post("/contracts", s.write(s.register))
@@ -158,6 +159,17 @@ func securityHeaders(next http.Handler) http.Handler {
 // index renders the searchable contract list.
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	s.indexPage(w, r, http.StatusOK, indexData{})
+}
+
+// stats renders the registry-wide summary: counts per network, the symbols
+// current interfaces share most, and the newest registrations.
+func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
+	summary, err := s.reg.Store().StatsDetail(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, r, "stats.html", statsData{Stats: summary})
 }
 
 // indexPage renders the index at a given status. It takes the data a failed
@@ -515,6 +527,10 @@ type contractData struct {
 	Interface       *model.Interface
 	IsCurrent       bool
 	Networks        []string
+}
+
+type statsData struct {
+	Stats *store.StatsDetail
 }
 
 // render writes a template, buffering it first so that a failure midway

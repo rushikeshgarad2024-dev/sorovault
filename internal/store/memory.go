@@ -657,9 +657,7 @@ func (m *Memory) Stats(ctx context.Context) (*Stats, error) {
 		stats.Versions += len(m.specs[k])
 
 		if stats.Latest == nil || newerContract(c, *stats.Latest) {
-			latest := c
-			latest.MissingSince = copyMissing(c.MissingSince)
-			latest.VerifiedAt = copyMissing(c.VerifiedAt)
+			latest := copyContract(c)
 			stats.Latest = &latest
 		}
 	}
@@ -673,6 +671,104 @@ func (m *Memory) Stats(ctx context.Context) (*Stats, error) {
 		stats.Networks = append(stats.Networks, *byNetwork[network])
 	}
 	return stats, nil
+}
+
+// StatsDetail returns Stats plus the symbols current interfaces share most
+// and the newest registrations.
+func (m *Memory) StatsDetail(ctx context.Context) (*StatsDetail, error) {
+	stats, err := m.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	functions := make(map[string]int)
+	types := make(map[string]int)
+	recent := make([]Contract, 0, len(m.contracts))
+	for k, c := range m.contracts {
+		if iface := m.currentInterface(k, c.CurrentWasmHash); iface != nil {
+			for _, fn := range iface.Functions {
+				addSymbol(functions, fn.Name)
+			}
+			for _, s := range iface.Types.Structs {
+				addSymbol(types, s.Name)
+			}
+			for _, u := range iface.Types.Unions {
+				addSymbol(types, u.Name)
+			}
+			for _, e := range iface.Types.Enums {
+				addSymbol(types, e.Name)
+			}
+			for _, e := range iface.Types.ErrorEnums {
+				addSymbol(types, e.Name)
+			}
+		}
+		recent = append(recent, copyContract(c))
+	}
+	m.mu.RUnlock()
+
+	sort.Slice(recent, func(i, j int) bool {
+		a, b := recent[i], recent[j]
+		if !a.FirstSeen.Equal(b.FirstSeen) {
+			return a.FirstSeen.After(b.FirstSeen)
+		}
+		if a.ContractID != b.ContractID {
+			return a.ContractID < b.ContractID
+		}
+		return a.Network < b.Network
+	})
+	if len(recent) > StatsRecentContracts {
+		recent = recent[:StatsRecentContracts]
+	}
+
+	detail := &StatsDetail{
+		Stats:           *stats,
+		TopFunctions:    topSymbols(functions, StatsTopSymbols),
+		TopTypes:        topSymbols(types, StatsTopSymbols),
+		RecentContracts: recent,
+	}
+	if len(recent) > 0 {
+		latest := recent[0]
+		detail.Latest = &latest
+	}
+	return detail, nil
+}
+
+// copyContract returns c with its pointers copied, so a caller cannot
+// change the in-memory record through the summary.
+func copyContract(c Contract) Contract {
+	c.MissingSince = copyMissing(c.MissingSince)
+	c.VerifiedAt = copyMissing(c.VerifiedAt)
+	return c
+}
+
+// addSymbol counts one non-empty interface symbol.
+func addSymbol(counts map[string]int, name string) {
+	if name != "" {
+		counts[name]++
+	}
+}
+
+// topSymbols turns symbol counts into the most common ones, ordered by
+// count descending and then name.
+func topSymbols(counts map[string]int, limit int) []StatsSymbol {
+	symbols := make([]StatsSymbol, 0, len(counts))
+	for name, count := range counts {
+		symbols = append(symbols, StatsSymbol{Name: name, Count: count})
+	}
+	sort.Slice(symbols, func(i, j int) bool {
+		if symbols[i].Count != symbols[j].Count {
+			return symbols[i].Count > symbols[j].Count
+		}
+		return symbols[i].Name < symbols[j].Name
+	})
+	if len(symbols) > limit {
+		symbols = symbols[:limit]
+	}
+	return symbols
 }
 
 // newerContract reports whether a was registered more recently than b. The

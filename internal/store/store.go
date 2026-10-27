@@ -468,6 +468,23 @@ type NetworkStats struct {
 	Versions  int    `json:"versions"`
 }
 
+// StatsSymbol is one function or user-defined type and how many current
+// interfaces declare it.
+type StatsSymbol struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// Stats limits the detail a summary carries. They are fixed so the memory
+// and Postgres stores answer the same question with the same amount of
+// output.
+const (
+	// StatsTopSymbols is how many functions and how many types Stats keeps.
+	StatsTopSymbols = 10
+	// StatsRecentContracts is how many recent registrations Stats keeps.
+	StatsRecentContracts = 5
+)
+
 // Stats summarises the size of the registry.
 type Stats struct {
 	// Networks is every network with a registered contract, ordered by
@@ -480,6 +497,19 @@ type Stats struct {
 	// one. Registered means first seen: refreshing an old contract does not
 	// make it new.
 	Latest *Contract `json:"latest_contract,omitempty"`
+}
+
+// StatsDetail is Stats plus the detail the browse UI shows: the symbols
+// current interfaces share most, and the newest registrations.
+type StatsDetail struct {
+	Stats
+	// TopFunctions and TopTypes are the names the current interfaces
+	// declare most often, ordered by count descending and then name.
+	TopFunctions []StatsSymbol `json:"top_functions"`
+	TopTypes     []StatsSymbol `json:"top_types"`
+	// RecentContracts lists the most recently registered contracts, newest
+	// first. Latest is the first entry when the registry is not empty.
+	RecentContracts []Contract `json:"recent_contracts"`
 }
 
 // Upgrade is one recorded interface upgrade: the version a contract ran
@@ -680,6 +710,11 @@ type Store interface {
 	// Stats summarises the registry: contract and version counts per
 	// network, and the most recently registered contract.
 	Stats(ctx context.Context) (*Stats, error)
+
+	// StatsDetail returns Stats with the most common function and type
+	// names and recent registrations, for the browse UI's statistics page.
+	// It costs more than Stats, so the JSON API does not call it.
+	StatsDetail(ctx context.Context) (*StatsDetail, error)
 
 	// ListUpgrades returns recent interface upgrades, newest first. A
 	// contract's first stored version is its registration, not an upgrade,

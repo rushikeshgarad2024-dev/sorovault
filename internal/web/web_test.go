@@ -268,6 +268,42 @@ func TestIndexListsContracts(t *testing.T) {
 	assert.Contains(t, body, `id="contract-rows"`)
 }
 
+func TestStatsEmpty(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+
+	resp, body := h.get(t, "/stats")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+	assert.Contains(t, body, "Registry statistics")
+	assert.Contains(t, body, "No contracts registered yet")
+	assert.Contains(t, body, "Most common functions")
+	assert.Contains(t, body, "Most common types")
+	assert.Contains(t, body, "Recent registrations")
+}
+
+func TestStatsShowsTotalsAndRegistrations(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.register(t, idA)
+	h.register(t, idB)
+
+	resp, body := h.get(t, "/stats")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, body, `scope="row"`,
+		"the stats tables use row headers for screen readers")
+	assert.Contains(t, body, "testnet")
+	assert.Contains(t, body, "WASM versions")
+	assert.Contains(t, body, "vote",
+		"functions from the current interfaces are counted")
+	assert.Contains(t, body, "Proposal",
+		"user-defined types from the current interfaces are counted")
+	assert.Contains(t, body, idA)
+	assert.Contains(t, body, idB)
+}
+
 func TestIndexNetworkSelectorFiltersResults(t *testing.T) {
 	t.Parallel()
 

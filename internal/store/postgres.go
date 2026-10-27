@@ -869,6 +869,121 @@ func (p *Postgres) Stats(ctx context.Context) (*Stats, error) {
 	return stats, nil
 }
 
+// StatsDetail returns Stats plus the symbols current interfaces share most
+// and the newest registrations.
+func (p *Postgres) StatsDetail(ctx context.Context) (*StatsDetail, error) {
+	stats, err := p.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	const functionsQ = `
+		SELECT f->>'name' AS name, count(*) AS total
+		FROM contracts c
+		JOIN specs s
+		  ON s.network = c.network AND s.contract_id = c.contract_id
+		 AND s.wasm_hash = c.current_wasm_hash
+		CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.spec->'functions', '[]'::jsonb)) AS f
+		WHERE COALESCE(f->>'name', '') <> ''
+		GROUP BY name
+		ORDER BY total DESC, name
+		LIMIT $1`
+
+	topFunctions, err := p.statsSymbols(ctx, functionsQ)
+	if err != nil {
+		return nil, err
+	}
+
+	const typesQ = `
+		SELECT t->>'name' AS name, count(*) AS total
+		FROM contracts c
+		JOIN specs s
+		  ON s.network = c.network AND s.contract_id = c.contract_id
+		 AND s.wasm_hash = c.current_wasm_hash
+		CROSS JOIN LATERAL (
+			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'structs', '[]'::jsonb)) AS t
+			UNION ALL
+			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'unions', '[]'::jsonb))
+			UNION ALL
+			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'enums', '[]'::jsonb))
+			UNION ALL
+			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'error_enums', '[]'::jsonb))
+		) AS types
+		WHERE COALESCE(t->>'name', '') <> ''
+		GROUP BY name
+		ORDER BY total DESC, name
+		LIMIT $1`
+
+	topTypes, err := p.statsSymbols(ctx, typesQ)
+	if err != nil {
+		return nil, err
+	}
+
+	const recentQ = `
+		SELECT network, contract_id, current_wasm_hash, name, source_url, source_commit, first_seen, last_refreshed, missing_since,
+		       creator, created_ledger, verified_by, verified_at, verified_wasm_hash
+		FROM contracts
+		ORDER BY first_seen DESC, contract_id, network
+		LIMIT $1`
+
+	rows, err := p.pool.Query(ctx, recentQ, StatsRecentContracts)
+	if err != nil {
+		return nil, fmt.Errorf("store: listing recent registrations: %w", err)
+	}
+	defer rows.Close()
+
+	recent := []Contract{}
+	for rows.Next() {
+		var c Contract
+		if err := rows.Scan(
+			&c.Network, &c.ContractID, &c.CurrentWasmHash, &c.Name,
+			&c.SourceURL, &c.SourceCommit, &c.FirstSeen, &c.LastRefreshed,
+			&c.MissingSince,
+			&c.Creator, &c.CreatedLedger, &c.VerifiedBy, &c.VerifiedAt, &c.VerifiedWasmHash,
+		); err != nil {
+			return nil, fmt.Errorf("store: scanning recent registration: %w", err)
+		}
+		recent = append(recent, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: listing recent registrations: %w", err)
+	}
+
+	detail := &StatsDetail{
+		Stats:           *stats,
+		TopFunctions:    topFunctions,
+		TopTypes:        topTypes,
+		RecentContracts: recent,
+	}
+	if len(recent) > 0 {
+		latest := recent[0]
+		detail.Latest = &latest
+	}
+	return detail, nil
+}
+
+// statsSymbols runs one of StatsDetail's symbol aggregates.
+func (p *Postgres) statsSymbols(ctx context.Context, q string) ([]StatsSymbol, error) {
+	rows, err := p.pool.Query(ctx, q, StatsTopSymbols)
+	if err != nil {
+		return nil, fmt.Errorf("store: listing top symbols: %w", err)
+	}
+	defer rows.Close()
+
+	symbols := []StatsSymbol{}
+	for rows.Next() {
+		var symbol StatsSymbol
+		if err := rows.Scan(&symbol.Name, &symbol.Count); err != nil {
+			return nil, fmt.Errorf("store: scanning top symbol: %w", err)
+		}
+		symbols = append(symbols, symbol)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: listing top symbols: %w", err)
+	}
+	return symbols, nil
+}
+
 // ListUpgrades returns recent interface upgrades, newest first.
 //
 // The window function pairs every spec row with the version its contract

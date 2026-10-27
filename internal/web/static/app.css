@@ -198,6 +198,88 @@ table { width: 100%; border-collapse: collapse; }
 
 .contracts tr:hover td { background: var(--panel); }
 
+/* Statistics */
+
+.stats-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.stats-summary div {
+  flex: 1 1 10rem;
+  padding: .9rem 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.stats-summary dt {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--dim);
+}
+
+.stats-summary dd {
+  margin: .2rem 0 0;
+  font-size: 1.7rem;
+  font-weight: 700;
+}
+
+.stats-table { font-size: .9rem; margin-bottom: 1.5rem; }
+
+.stats-table caption {
+  padding-bottom: .4rem;
+  text-align: left;
+  color: var(--dim);
+  font-size: .8rem;
+}
+
+.stats-table th,
+.stats-table td {
+  padding: .45rem .6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.stats-table thead th {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.stats-table tbody th { font-weight: 500; }
+
+.stats-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1.5rem;
+}
+
+.stats-columns section { min-width: 0; }
+
+.recent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.recent-list .name { margin-top: 0; }
+
 .params { font-size: .875rem; margin: .5rem 0 .6rem; }
 .params td { padding: .22rem .6rem .22rem 0; vertical-align: top; }
 .pname { color: var(--ink); white-space: nowrap; }

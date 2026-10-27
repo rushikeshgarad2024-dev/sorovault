@@ -1383,6 +1383,62 @@ func runStoreSuite(t *testing.T, newStore factory) {
 			"the most recently registered contract, not the most recently refreshed")
 	})
 
+	t.Run("stats aggregate current symbols and recent registrations", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		// The superseded interface names a function the current one does
+		// not, so counting it would be a stale-symbol bug.
+		require.NoError(t, s.Save(ctx, contract(idA, "testnet", "h0"), iface("legacy")))
+		time.Sleep(5 * time.Millisecond)
+
+		require.NoError(t, s.Save(ctx, contract(idA, "testnet", "h1"), &model.Interface{
+			ABIVersion: model.ABIVersion,
+			Functions: []model.Function{
+				{Name: "vote"},
+				{Name: "get_proposal"},
+			},
+			Types: model.Types{
+				Structs: []model.Struct{{Name: "Proposal"}},
+				Enums:   []model.Enum{{Name: "Status"}},
+				ErrorEnums: []model.ErrorEnum{
+					{Name: "Error"},
+				},
+			},
+		}))
+		time.Sleep(5 * time.Millisecond)
+
+		require.NoError(t, s.Save(ctx, contract(idB, "public", "h2"), &model.Interface{
+			ABIVersion: model.ABIVersion,
+			Functions:  []model.Function{{Name: "vote"}},
+			Types: model.Types{
+				Structs: []model.Struct{{Name: "Proposal"}},
+				Unions:  []model.Union{{Name: "Choice"}},
+			},
+		}))
+
+		stats, err := s.StatsDetail(ctx)
+		require.NoError(t, err)
+
+		assert.Equal(t, []store.StatsSymbol{
+			{Name: "vote", Count: 2},
+			{Name: "get_proposal", Count: 1},
+		}, stats.TopFunctions, "symbols come from current interfaces only")
+		assert.Equal(t, []store.StatsSymbol{
+			{Name: "Proposal", Count: 2},
+			{Name: "Choice", Count: 1},
+			{Name: "Error", Count: 1},
+			{Name: "Status", Count: 1},
+		}, stats.TopTypes)
+
+		require.Len(t, stats.RecentContracts, 2)
+		assert.Equal(t, idB, stats.RecentContracts[0].ContractID)
+		assert.Equal(t, idA, stats.RecentContracts[1].ContractID,
+			"recent registrations use first_seen, not last_refreshed")
+		require.NotNil(t, stats.Latest)
+		assert.Equal(t, stats.RecentContracts[0].ContractID, stats.Latest.ContractID)
+	})
+
 	t.Run("upgrade feed excludes registrations and pages newest first", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

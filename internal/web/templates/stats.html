@@ -1,0 +1,123 @@
+{{define "stats.html"}}
+{{template "page_head" "Registry statistics · SoroVault"}}
+
+<h1>Registry statistics</h1>
+<p class="lede">
+  What the registry covers: every contract, every stored WASM version, and
+  the interface symbols that show up most often across current interfaces.
+</p>
+
+<dl class="stats-summary">
+  <div>
+    <dt>Contracts</dt>
+    <dd>{{.Stats.Contracts}}</dd>
+  </div>
+  <div>
+    <dt>WASM versions</dt>
+    <dd>{{.Stats.Versions}}</dd>
+  </div>
+  <div>
+    <dt>Networks</dt>
+    <dd>{{len .Stats.Networks}}</dd>
+  </div>
+</dl>
+
+<section aria-labelledby="stats-networks">
+  <h2 id="stats-networks">By network</h2>
+  {{if .Stats.Networks}}
+  <table class="stats-table">
+    <caption>Contracts and stored WASM versions in each network.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Network</th>
+        <th scope="col">Contracts</th>
+        <th scope="col">WASM versions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {{range .Stats.Networks}}
+      <tr>
+        <th scope="row"><span class="badge">{{.Network}}</span></th>
+        <td>{{.Contracts}}</td>
+        <td>{{.Versions}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <div class="empty">No contracts registered yet. <a href="/">Register the first one</a>.</div>
+  {{end}}
+</section>
+
+<div class="stats-columns">
+  <section aria-labelledby="stats-functions">
+    <h2 id="stats-functions">Most common functions</h2>
+    {{if .Stats.TopFunctions}}
+    <table class="stats-table">
+      <caption>Functions declared by the current interface of each contract.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Function</th>
+          <th scope="col">Contracts</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{range .Stats.TopFunctions}}
+        <tr>
+          <th scope="row"><code>{{.Name}}</code></th>
+          <td>{{.Count}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="dim">No functions have been registered yet.</p>
+    {{end}}
+  </section>
+
+  <section aria-labelledby="stats-types">
+    <h2 id="stats-types">Most common types</h2>
+    {{if .Stats.TopTypes}}
+    <table class="stats-table">
+      <caption>Structs, unions and enums declared by the current interface of each contract.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Type</th>
+          <th scope="col">Contracts</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{range .Stats.TopTypes}}
+        <tr>
+          <th scope="row"><code>{{.Name}}</code></th>
+          <td>{{.Count}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="dim">No user-defined types have been registered yet.</p>
+    {{end}}
+  </section>
+</div>
+
+<section aria-labelledby="stats-recent">
+  <h2 id="stats-recent">Recent registrations</h2>
+  {{if .Stats.RecentContracts}}
+  <ul class="recent-list">
+  {{range .Stats.RecentContracts}}
+    <li>
+      <a class="mono" href="/contracts/{{.ContractID}}?network={{.Network}}">{{.ContractID}}</a>
+      <span class="badge">{{.Network}}</span>
+      {{if .Name}}<span class="name">{{.Name}}</span>{{end}}
+      <span class="dim">{{.FirstSeen.UTC.Format "2006-01-02 15:04"}} UTC</span>
+    </li>
+  {{end}}
+  </ul>
+  {{else}}
+  <p class="dim">No contracts have been registered yet.</p>
+  {{end}}
+</section>
+
+{{template "page_foot"}}
+{{end}}
