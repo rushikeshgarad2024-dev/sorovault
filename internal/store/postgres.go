@@ -878,15 +878,15 @@ func (p *Postgres) StatsDetail(ctx context.Context) (*StatsDetail, error) {
 	}
 
 	const functionsQ = `
-		SELECT f->>'name' AS name, count(*) AS total
+		SELECT f->>'name' AS symbol, count(*) AS total
 		FROM contracts c
 		JOIN specs s
 		  ON s.network = c.network AND s.contract_id = c.contract_id
 		 AND s.wasm_hash = c.current_wasm_hash
 		CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.spec->'functions', '[]'::jsonb)) AS f
 		WHERE COALESCE(f->>'name', '') <> ''
-		GROUP BY name
-		ORDER BY total DESC, name
+		GROUP BY 1
+		ORDER BY total DESC, 1
 		LIMIT $1`
 
 	topFunctions, err := p.statsSymbols(ctx, functionsQ)
@@ -895,7 +895,7 @@ func (p *Postgres) StatsDetail(ctx context.Context) (*StatsDetail, error) {
 	}
 
 	const typesQ = `
-		SELECT t->>'name' AS name, count(*) AS total
+		SELECT t->>'name' AS symbol, count(*) AS total
 		FROM contracts c
 		JOIN specs s
 		  ON s.network = c.network AND s.contract_id = c.contract_id
@@ -910,8 +910,8 @@ func (p *Postgres) StatsDetail(ctx context.Context) (*StatsDetail, error) {
 			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'error_enums', '[]'::jsonb))
 		) AS types
 		WHERE COALESCE(t->>'name', '') <> ''
-		GROUP BY name
-		ORDER BY total DESC, name
+		GROUP BY 1
+		ORDER BY total DESC, 1
 		LIMIT $1`
 
 	topTypes, err := p.statsSymbols(ctx, typesQ)
