@@ -24,6 +24,7 @@ import (
 	"github.com/soroworks/sorovault/internal/spec"
 	"github.com/soroworks/sorovault/internal/stellar"
 	"github.com/soroworks/sorovault/internal/store"
+	"github.com/soroworks/sorovault/internal/wasm"
 )
 
 // ErrNetworkMismatch reports that the RPC endpoint serves a different
@@ -348,14 +349,59 @@ func (r *Registry) Register(ctx context.Context, contractID string) (*Result, er
 	return result, nil
 }
 
+// normalizeWasmHash validates a WASM hash and returns its lowercase form.
+func normalizeWasmHash(wasmHash string) (string, error) {
+	rawHash, err := hex.DecodeString(wasmHash)
+	if err != nil || len(rawHash) != sha256.Size {
+		return "", fmt.Errorf("%w: %q", ErrInvalidWasmHash, wasmHash)
+	}
+	return hex.EncodeToString(rawHash), nil
+}
+
+// fetchVerifiedWasm downloads the module a normalized hash names and proves
+// the bytes are what the hash promises.
+func (r *Registry) fetchVerifiedWasm(ctx context.Context, wasmHash string) ([]byte, error) {
+	module, err := r.fetcher.FetchWasm(ctx, wasmHash)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(module)
+	if hex.EncodeToString(digest[:]) != wasmHash {
+		return nil, fmt.Errorf("registry: fetched wasm does not match hash %s", wasmHash)
+	}
+	return module, nil
+}
+
+// Wasm returns uploaded code by its SHA-256 hash.
+//
+// Modules are fetched from the configured network on demand rather than
+// stored: the registry keeps decoded interfaces, and the chain remains the
+// source of truth for the bytes. The bytes are verified against the hash
+// before they are returned, because callers use that hash as the URL and
+// must not be served content a hostile or corrupt RPC substituted.
+func (r *Registry) Wasm(ctx context.Context, wasmHash string) ([]byte, error) {
+	normalized, err := normalizeWasmHash(wasmHash)
+	if err != nil {
+		return nil, err
+	}
+	module, err := r.fetchVerifiedWasm(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+	if len(module) > wasm.MaxModuleSize {
+		return nil, fmt.Errorf("%w: module is %d bytes, limit is %d",
+			wasm.ErrModuleTooLarge, len(module), wasm.MaxModuleSize)
+	}
+	return module, nil
+}
+
 // CatalogWasm decodes code uploaded to the network without requiring a
 // contract instance to reference it.
 func (r *Registry) CatalogWasm(ctx context.Context, wasmHash string) (*WasmResult, error) {
-	rawHash, err := hex.DecodeString(wasmHash)
-	if err != nil || len(rawHash) != sha256.Size {
-		return nil, fmt.Errorf("%w: %q", ErrInvalidWasmHash, wasmHash)
+	wasmHash, err := normalizeWasmHash(wasmHash)
+	if err != nil {
+		return nil, err
 	}
-	wasmHash = hex.EncodeToString(rawHash)
 
 	network, err := r.Network(ctx)
 	if err != nil {
@@ -370,16 +416,12 @@ func (r *Registry) CatalogWasm(ctx context.Context, wasmHash string) (*WasmResul
 		return nil, err
 	}
 
-	wasm, err := r.fetcher.FetchWasm(ctx, wasmHash)
+	module, err := r.fetchVerifiedWasm(ctx, wasmHash)
 	if err != nil {
 		return nil, err
 	}
-	digest := sha256.Sum256(wasm)
-	if hex.EncodeToString(digest[:]) != wasmHash {
-		return nil, fmt.Errorf("registry: fetched wasm does not match hash %s", wasmHash)
-	}
 
-	iface, err := r.decoder.Decode(wasm)
+	iface, err := r.decoder.Decode(module)
 	if err != nil {
 		return nil, fmt.Errorf("registry: decoding wasm %s: %w", wasmHash, err)
 	}

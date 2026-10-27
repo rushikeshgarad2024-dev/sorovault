@@ -131,6 +131,7 @@ func (s *Server) Routes() chi.Router {
 	r.Post("/decode", s.rateLimited(s.decodeWasm))
 	r.Post("/contracts", s.write(s.rateLimited(s.registerContract)))
 	r.Post("/contracts:batch", s.write(s.batchRegisterContracts))
+	r.Get("/wasm/{hash}.wasm", s.getWasmModule)
 	r.Get("/wasm/{hash}", s.getWasmSpec)
 	r.Post("/wasm/{hash}", s.write(s.catalogWasm))
 	r.Get("/wasm/{hash}/contracts", s.listWasmContracts)
@@ -255,6 +256,48 @@ func (s *Server) getWasmSpec(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, stored)
+}
+
+// getWasmModule serves GET /api/wasm/{hash}.wasm: the uploaded module
+// itself, fetched from the configured network and verified against the hash
+// in the URL. Because the URL is content-addressed, the response is
+// immutable and safe to cache for as long as a client likes.
+//
+// The bytes are not stored by SoroVault — the chain remains the source of
+// truth — so ?network, when given, must name the network this instance is
+// pointed at. Serving another network's bytes under this hash would defeat
+// the verification the hash is meant to provide.
+func (s *Server) getWasmModule(w http.ResponseWriter, r *http.Request) {
+	wasmHash, err := parseWasmHash(chi.URLParam(r, "hash"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid wasm hash")
+		return
+	}
+
+	network, err := s.reg.Network(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if requested := strings.TrimSpace(r.URL.Query().Get("network")); requested != "" && stellar.NetworkName(requested) != network {
+		writeError(w, http.StatusBadRequest,
+			"this SoroVault fetches modules from the "+stellar.NetworkLogLabel(network)+" network")
+		return
+	}
+
+	module, err := s.reg.Wasm(r.Context(), wasmHash)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/wasm")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Content-Length", strconv.Itoa(len(module)))
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(module); err != nil {
+		s.log.DebugContext(r.Context(), "writing wasm module", "wasm_hash", wasmHash, "error", err)
+	}
 }
 
 // listWasmContracts serves GET /api/wasm/{hash}/contracts.
