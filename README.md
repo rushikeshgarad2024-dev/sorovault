@@ -243,6 +243,8 @@ back out of what it became. `--json` prints the same rows for scripts.
 | `RPC_URL` | `https://soroban-testnet.stellar.org` | Stellar RPC endpoint |
 | `NETWORK_PASSPHRASE` | `Test SDF Network ; September 2015` | the network you expect `RPC_URL` to serve |
 | `HTTP_ADDR` | `:8080` | listen address |
+| `TLS_CERT_FILE` | — | PEM certificate path; set with `TLS_KEY_FILE` to serve HTTPS (`--tls-cert` overrides) |
+| `TLS_KEY_FILE` | — | PEM private key path; set with `TLS_CERT_FILE` (`--tls-key` overrides) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `text` | `text` for people, `json` for one parseable object per line |
 | `RPC_TIMEOUT` | `30s` | bound on a single contract fetch |

@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,6 +38,7 @@ const requestTimeout = 60 * time.Second
 func newServeCmd() *cobra.Command {
 	var addr string
 	var readOnly bool
+	var tlsCertFile, tlsKeyFile string
 
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -45,6 +49,16 @@ func newServeCmd() *cobra.Command {
 				listenAddr := a.cfg.HTTPAddr
 				if addr != "" {
 					listenAddr = addr
+				}
+				certFile, keyFile := a.cfg.TLSCertFile, a.cfg.TLSKeyFile
+				if tlsCertFile != "" {
+					certFile = tlsCertFile
+				}
+				if tlsKeyFile != "" {
+					keyFile = tlsKeyFile
+				}
+				if (certFile == "") != (keyFile == "") {
+					return errors.New("serve: TLS certificate and key must be supplied together")
 				}
 				if readOnly {
 					// The flag wins over READ_ONLY, like --addr over
@@ -67,13 +81,15 @@ func newServeCmd() *cobra.Command {
 					return err
 				}
 
-				return serve(ctx, listenAddr, handler, a.log)
+				return serve(ctx, listenAddr, handler, certFile, keyFile, a.log)
 			})
 		},
 	}
 
 	cmd.Flags().StringVar(&addr, "addr", "", "listen address (overrides HTTP_ADDR)")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "refuse every write endpoint with 405; reads and automatic refreshes stay on (overrides READ_ONLY)")
+	cmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "PEM certificate path (overrides TLS_CERT_FILE; requires the key)")
+	cmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "PEM private key path (overrides TLS_KEY_FILE; requires the certificate)")
 	return cmd
 }
 
@@ -355,9 +371,14 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// serve runs the HTTP server until the context is cancelled or a termination
-// signal arrives, then drains in-flight requests.
-func serve(ctx context.Context, addr string, handler http.Handler, log *slog.Logger) error {
+// serve runs the HTTP or HTTPS server until the context is cancelled or a
+// termination signal arrives, then drains in-flight requests.
+func serve(ctx context.Context, addr string, handler http.Handler, certFile, keyFile string, log *slog.Logger) error {
+	if (certFile == "") != (keyFile == "") {
+		return errors.New("serve: TLS certificate and key must be supplied together")
+	}
+	tlsEnabled := certFile != ""
+
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -370,11 +391,22 @@ func serve(ctx context.Context, addr string, handler http.Handler, log *slog.Log
 		// bounds each request, and a write deadline here would cut
 		// responses off without the clean error message it produces.
 	}
+	if tlsEnabled {
+		srv.TLSConfig = newTLSConfig()
+	} else {
+		warnIfPlainHTTP(log, addr)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", addr, "version", version)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Info("listening", "addr", addr, "tls", tlsEnabled, "version", version)
+		var err error
+		if tlsEnabled {
+			err = srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
 		}
@@ -399,4 +431,36 @@ func serve(ctx context.Context, addr string, handler http.Handler, log *slog.Log
 		}
 		return nil
 	}
+}
+
+// newTLSConfig is the policy for the built-in listener. TLS 1.0 and 1.1 are
+// deprecated and cannot negotiate modern cipher suites; pin the floor so a
+// future Go default cannot quietly lower it.
+func newTLSConfig() *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS12}
+}
+
+// warnIfPlainHTTP logs when a plain-HTTP listener is reachable beyond the
+// loopback interface. A reverse proxy may still terminate TLS in front, so
+// this is a warning rather than a refusal.
+func warnIfPlainHTTP(log *slog.Logger, addr string) {
+	if isLoopbackAddr(addr) {
+		return
+	}
+	log.Warn("serving plain HTTP on a non-loopback address; writes and registrations are not encrypted",
+		"addr", addr)
+}
+
+// isLoopbackAddr reports whether addr binds only the local host. An empty
+// host means every interface, so it is not loopback.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

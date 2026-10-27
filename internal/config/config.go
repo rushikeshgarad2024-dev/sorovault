@@ -65,6 +65,11 @@ type Config struct {
 	DatabaseMinConns int32
 	// HTTPAddr is the address the API and browse UI listen on.
 	HTTPAddr string
+	// TLSCertFile and TLSKeyFile, when both set, make `serve` terminate TLS.
+	// Setting only one is a configuration error: a listener cannot offer TLS
+	// without a certificate and its key.
+	TLSCertFile string
+	TLSKeyFile  string
 	// PublicURL is the externally reachable origin for link previews and sitemaps.
 	PublicURL string
 	// LogLevel is one of debug, info, warn, error.
@@ -211,6 +216,8 @@ var knownConfigKeys = map[string]bool{
 	"database_max_conns":           true,
 	"database_min_conns":           true,
 	"http_addr":                    true,
+	"tls_cert_file":                true,
+	"tls_key_file":                 true,
 	"public_url":                   true,
 	"log_level":                    true,
 	"log_format":                   true,
@@ -442,6 +449,9 @@ func LoadWith(configPath string) (*Config, error) {
 		}
 	}
 
+	if err := loadTLS(cfg, src); err != nil {
+		return nil, err
+	}
 	if err := loadEvents(cfg, src); err != nil {
 		return nil, err
 	}
@@ -457,6 +467,18 @@ func LoadWith(configPath string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadTLS reads the certificate and key pair. TLS is opt-in, but half a
+// pair is a startup error: serving plain HTTP because the operator mistyped
+// one path would hide the mistake until traffic was already exposed.
+func loadTLS(cfg *Config, src *source) error {
+	cfg.TLSCertFile = strings.TrimSpace(src.Getenv("TLS_CERT_FILE"))
+	cfg.TLSKeyFile = strings.TrimSpace(src.Getenv("TLS_KEY_FILE"))
+	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
+		return errors.New("config: TLS_CERT_FILE and TLS_KEY_FILE must be set together")
+	}
+	return nil
 }
 
 // loadEvents reads the event-driven refresh settings.

@@ -25,8 +25,8 @@ A minimal production deployment is:
 - one `sorovault serve` process, or a small number of identical replicas behind
   a load balancer;
 - one PostgreSQL database the replicas share;
-- a TLS-terminating proxy or ingress in front, because the server itself speaks
-  plain HTTP on `HTTP_ADDR`;
+- TLS terminated by the server itself (`TLS_CERT_FILE` and `TLS_KEY_FILE`), or
+  by a proxy or ingress in front;
 - an RPC endpoint in `RPC_URL` that serves the network named by
   `NETWORK_PASSPHRASE`.
 
@@ -74,8 +74,15 @@ beyond the environment, so arrange the split deliberately.
 
 ### TLS and the proxy
 
-The HTTP server does not terminate TLS. Put it behind the proxy or ingress you
-already operate. Two details matter:
+TLS can terminate in `sorovault serve` itself or at the proxy or ingress in
+front. To terminate in-process, set `TLS_CERT_FILE` and `TLS_KEY_FILE` (or pass
+`--tls-cert` and `--tls-key`). Setting only one is a startup error, and the
+listener requires TLS 1.2 or newer. When neither is set and `HTTP_ADDR` binds a
+non-loopback address, startup logs a warning because writes and registrations
+would travel in clear text.
+
+If TLS terminates at the proxy, keep both paths unset and forward plain HTTP
+over a private network. Two details matter:
 
 - **Preserve `Origin` and `Referer`.** The browse UI accepts its registration
   form only when the browser names the same origin. A proxy that strips those

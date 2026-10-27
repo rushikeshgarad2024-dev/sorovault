@@ -25,7 +25,8 @@ func setEnv(t *testing.T, vars map[string]string) {
 
 	for _, key := range []string{
 		"RPC_URL", "NETWORK_PASSPHRASE", "DATABASE_URL", "DATABASE_URL_FILE",
-		"HTTP_ADDR", "LOG_LEVEL", "LOG_FORMAT", "RPC_TIMEOUT", "REFRESH_INTERVAL",
+		"HTTP_ADDR", "TLS_CERT_FILE", "TLS_KEY_FILE",
+		"LOG_LEVEL", "LOG_FORMAT", "RPC_TIMEOUT", "REFRESH_INTERVAL",
 		"MAX_CONCURRENT_REGISTRATIONS", "REFRESH_WEBHOOK_URL",
 		"REFRESH_WEBHOOK_SECRET", "REFRESH_EVENTS", "REFRESH_EVENTS_INTERVAL",
 		"SIGNING_KEY", "SIGNING_KEY_FILE", "SIGNING_RETIRED_KEYS",
@@ -60,6 +61,8 @@ func TestLoadDefaults(t *testing.T) {
 		"the concurrency limit is left to the registry unless it is configured")
 	assert.Zero(t, cfg.DatabaseMaxConns, "the pool size is left to pgx unless it is configured")
 	assert.Zero(t, cfg.DatabaseMinConns, "the pool size is left to pgx unless it is configured")
+	assert.Empty(t, cfg.TLSCertFile, "TLS is opt-in")
+	assert.Empty(t, cfg.TLSKeyFile, "TLS is opt-in")
 	assert.Empty(t, cfg.CORSOrigins, "CORS is opt-in")
 	assert.Equal(t, config.DefaultRateLimitPerMinute, cfg.RateLimitPerMinute)
 	assert.Equal(t, config.DefaultRateLimitBurst, cfg.RateLimitBurst)
@@ -86,6 +89,68 @@ func TestLoadOverrides(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:9999", cfg.HTTPAddr)
 	assert.Equal(t, slog.LevelDebug, cfg.LogLevel)
 	assert.Equal(t, 90*time.Second, cfg.RPCTimeout)
+}
+
+func TestLoadTLS(t *testing.T) {
+	tests := []struct {
+		name     string
+		vars     map[string]string
+		wantCert string
+		wantKey  string
+		wantErr  string
+	}{
+		{
+			name: "off by default",
+		},
+		{
+			name: "certificate and key",
+			vars: map[string]string{
+				"TLS_CERT_FILE": "/etc/sorovault/tls.crt",
+				"TLS_KEY_FILE":  "/etc/sorovault/tls.key",
+			},
+			wantCert: "/etc/sorovault/tls.crt",
+			wantKey:  "/etc/sorovault/tls.key",
+		},
+		{
+			name: "surrounding space is ignored",
+			vars: map[string]string{
+				"TLS_CERT_FILE": " /etc/sorovault/tls.crt ",
+				"TLS_KEY_FILE":  " /etc/sorovault/tls.key ",
+			},
+			wantCert: "/etc/sorovault/tls.crt",
+			wantKey:  "/etc/sorovault/tls.key",
+		},
+		{
+			name:    "certificate without key",
+			vars:    map[string]string{"TLS_CERT_FILE": "/etc/sorovault/tls.crt"},
+			wantErr: "TLS_CERT_FILE and TLS_KEY_FILE must be set together",
+		},
+		{
+			name:    "key without certificate",
+			vars:    map[string]string{"TLS_KEY_FILE": "/etc/sorovault/tls.key"},
+			wantErr: "TLS_CERT_FILE and TLS_KEY_FILE must be set together",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := map[string]string{"DATABASE_URL": testDatabaseURL}
+			for key, value := range tt.vars {
+				env[key] = value
+			}
+			setEnv(t, env)
+
+			cfg, err := config.Load()
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCert, cfg.TLSCertFile)
+			assert.Equal(t, tt.wantKey, cfg.TLSKeyFile)
+		})
+	}
 }
 
 func TestMaxConcurrentRegistrations(t *testing.T) {
@@ -622,6 +687,8 @@ database_max_conns: 8
 max_concurrent_registrations: 2
 rate_limit_per_minute: 60
 refresh_webhook_url: "https://example.com/trapdoor"      # a comment
+tls_cert_file: "/etc/sorovault/tls.crt"
+tls_key_file: "/etc/sorovault/tls.key"
 `)
 
 	cfg, err := config.LoadWith(yaml)
@@ -634,6 +701,8 @@ refresh_webhook_url: "https://example.com/trapdoor"      # a comment
 	assert.Equal(t, 2, cfg.MaxConcurrentRegistrations)
 	assert.Equal(t, 60, cfg.RateLimitPerMinute)
 	assert.Equal(t, "https://example.com/trapdoor", cfg.RefreshWebhookURL)
+	assert.Equal(t, "/etc/sorovault/tls.crt", cfg.TLSCertFile)
+	assert.Equal(t, "/etc/sorovault/tls.key", cfg.TLSKeyFile)
 	assert.Equal(t, testDatabaseURL, cfg.DatabaseURL)
 
 	// The environment overrides the file, setting by setting; a name the
