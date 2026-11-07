@@ -883,7 +883,10 @@ func (p *Postgres) StatsDetail(ctx context.Context) (*StatsDetail, error) {
 		JOIN specs s
 		  ON s.network = c.network AND s.contract_id = c.contract_id
 		 AND s.wasm_hash = c.current_wasm_hash
-		CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.spec->'functions', '[]'::jsonb)) AS f
+		CROSS JOIN LATERAL jsonb_array_elements(
+			CASE WHEN jsonb_typeof(s.spec->'functions') = 'array'
+			     THEN s.spec->'functions' ELSE '[]'::jsonb END
+		) AS f
 		WHERE COALESCE(f->>'name', '') <> ''
 		GROUP BY 1
 		ORDER BY total DESC, 1
@@ -901,13 +904,21 @@ func (p *Postgres) StatsDetail(ctx context.Context) (*StatsDetail, error) {
 		  ON s.network = c.network AND s.contract_id = c.contract_id
 		 AND s.wasm_hash = c.current_wasm_hash
 		CROSS JOIN LATERAL (
-			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'structs', '[]'::jsonb)) AS t
+			SELECT jsonb_array_elements(
+				CASE WHEN jsonb_typeof(s.spec->'types'->'structs') = 'array'
+				     THEN s.spec->'types'->'structs' ELSE '[]'::jsonb END) AS t
 			UNION ALL
-			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'unions', '[]'::jsonb))
+			SELECT jsonb_array_elements(
+				CASE WHEN jsonb_typeof(s.spec->'types'->'unions') = 'array'
+				     THEN s.spec->'types'->'unions' ELSE '[]'::jsonb END)
 			UNION ALL
-			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'enums', '[]'::jsonb))
+			SELECT jsonb_array_elements(
+				CASE WHEN jsonb_typeof(s.spec->'types'->'enums') = 'array'
+				     THEN s.spec->'types'->'enums' ELSE '[]'::jsonb END)
 			UNION ALL
-			SELECT jsonb_array_elements(COALESCE(s.spec->'types'->'error_enums', '[]'::jsonb))
+			SELECT jsonb_array_elements(
+				CASE WHEN jsonb_typeof(s.spec->'types'->'error_enums') = 'array'
+				     THEN s.spec->'types'->'error_enums' ELSE '[]'::jsonb END)
 		) AS types
 		WHERE COALESCE(t->>'name', '') <> ''
 		GROUP BY 1
